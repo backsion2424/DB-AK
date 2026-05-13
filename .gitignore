@@ -12,3 +12,5 @@ coverage/
 firebase-applet-config.json
 
 사용법.html
+
+*.exe
