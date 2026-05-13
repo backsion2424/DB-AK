@@ -3,7 +3,7 @@ import {
   Search, Plus, Filter, Users, Tag, LayoutGrid, LogOut, Loader2, Sparkles, FolderSync, Info, Calendar, Clock, Play, Pause, SkipBack, SkipForward, ExternalLink, Menu, FolderOpen, Search as SearchIcon, Wrench, Settings, ChevronRight, Lock, Key, Database, RefreshCcw, HardDrive, FileVideo, List, X, Trash2, AlertTriangle, Monitor
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { List as VirtualList, Grid as VirtualGrid } from 'react-window';
+import { FixedSizeList as FixedList } from 'react-window';
 import { VideoItem, VideoListItem, Modal, MenuBarItem, SidebarSection, TitleBar, SettingsModal, VideoPlayer, ContextMenu, StarRating } from './components/UI';
 import { VirtualVideoGrid } from './components/VideoGrid';
 import { Video } from './types';
@@ -340,18 +340,26 @@ export default function App() {
     abortScrapingRef.current = false;
     let addedCount = 0;
     let failCount = 0;
+    let skipCount = 0;
     let errorMsg = '';
+
+    console.log(`Starting to process ${files.length} files...`);
 
     try {
       const newCache = new Map(localFileCache);
       let updated = false;
 
       for (const file of Array.from(files)) {
-        if (abortScrapingRef.current) break;
+        if (abortScrapingRef.current) {
+          console.log('Processing aborted by user');
+          break;
+        }
         try {
           const code = extractCode(file.name);
           const codeBase = code.replace(/[^A-Z0-9]/g, '');
           
+          console.log(`Processing file: ${file.name}, Extracted code: ${code}`);
+
           // Sync with existing if possible
           const existing = videos.find(v => {
             if (v.code === 'MANUAL') return false;
@@ -360,12 +368,13 @@ export default function App() {
             return vCode === code || (codeBase && vCodeBase === codeBase);
           });
           if (existing) {
+            console.log(`Found existing video for code ${code}: ${existing.id}`);
             newCache.set(existing.id, file);
             updated = true;
             if (!existing.size) {
               await updateVideo(existing.id, { size: file.size });
             }
-            addedCount++;
+            skipCount++;
             continue;
           }
 
@@ -374,9 +383,11 @@ export default function App() {
           
           // Skip scraping if in offline mode
           if (code && !offlineMode) {
+            console.log(`Attempting to scrape metadata for ${code}...`);
             try {
               const metadata = await electron.scrapeMetadata(code);
               videoData = { ...metadata, title: fileNameNoExt, rating: 0, size: file.size };
+              console.log(`Metadata scraped successfully for ${code}`);
             } catch (scrapeErr) {
               console.warn(`Scraping failed for ${code}, falling back to manual:`, scrapeErr);
               videoData = {
@@ -395,6 +406,7 @@ export default function App() {
               };
             }
           } else {
+            console.log(`Adding ${file.name} in offline/manual mode`);
             videoData = {
               title: fileNameNoExt,
               code: code || 'MANUAL',
@@ -417,10 +429,12 @@ export default function App() {
 
           const newId = await electron.saveVideo(videoData as Video);
           if (newId) {
+            console.log(`Video saved with ID: ${newId}`);
             newCache.set(newId, file);
             updated = true;
             addedCount++;
           } else {
+            console.error(`saveVideo returned null for ${file.name}`);
             failCount++;
           }
         } catch (err) {
@@ -440,13 +454,14 @@ export default function App() {
       }
 
       if (failCount > 0) {
-        alert(`${addedCount}개 추가됨, ${failCount}개 실패.\n마지막 오류: ${errorMsg}`);
-      } else if (addedCount > 0) {
-        // Option to show success toast
+        alert(`${addedCount}개 추가됨, ${skipCount}개 기존 항목 매칭, ${failCount}개 실패.\n마지막 오류: ${errorMsg}`);
+      } else if (addedCount > 0 || skipCount > 0) {
+        console.log(`Processing completed: ${addedCount} added, ${skipCount} skipped`);
       }
 
     } catch (err) {
-      alert(`파일 처리 전역 오류: ${err instanceof Error ? err.message : String(err)}`);
+      errorMsg = err instanceof Error ? err.message : String(err);
+      alert(`파일 처리 도중 전체 오류가 발생했습니다: ${errorMsg}`);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (folderInputRef.current) folderInputRef.current.value = '';
@@ -1818,12 +1833,13 @@ export default function App() {
                         <span>평점</span>
                         <span className="text-right">용량</span>
                       </div>
-                      <VirtualList
-                        rowCount={filteredVideos.length}
-                        rowHeight={80}
-                        style={{ height: (containerSize.height || (window.innerHeight - 300)) - 40, width: containerSize.width }}
-                        rowProps={{}}
-                        rowComponent={({ index, style }) => (
+                      <FixedList
+                        itemCount={filteredVideos.length}
+                        itemSize={80}
+                        height={(containerSize.height || (window.innerHeight - 300)) - 40}
+                        width={containerSize.width}
+                      >
+                        {({ index, style }: { index: number, style: React.CSSProperties }) => (
                           <div style={style}>
                             <VideoListItem 
                               video={filteredVideos[index]} 
@@ -1837,7 +1853,7 @@ export default function App() {
                             />
                           </div>
                         )}
-                      />
+                      </FixedList>
                     </div>
                   )}
                 </div>
@@ -3279,16 +3295,18 @@ export default function App() {
         title="AI API 키 설정 필요"
         maxWidth="max-w-md"
       >
-        <div className="space-y-6">
-          <div className="flex items-start gap-4 bg-amber-500/10 border border-amber-500/20 p-4 rounded-sm">
-            <AlertTriangle className="w-6 h-6 text-amber-500 shrink-0 mt-0.5" />
-            <div className="space-y-2">
-              <p className="text-[11px] font-bold text-amber-200 leading-relaxed mt-1">
-                Gemini API 키가 설정되지 않았습니다.
+        <div className="space-y-8 py-2">
+          <div className="flex items-start gap-4 bg-amber-500/10 border border-amber-600/30 p-5 rounded-md">
+            <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+               <AlertTriangle className="w-6 h-6 text-amber-500" />
+            </div>
+            <div className="space-y-3">
+              <p className="text-[13px] font-black text-amber-200 uppercase tracking-wider">
+                AI 정보 수집이 제한됨
               </p>
-              <p className="text-[10px] text-zinc-400 leading-relaxed font-medium">
-                AI 정보 스크랩 기능을 사용하시려면 Gemini API 키가 필요합니다.<br/>
-                오프라인 모드로 사용하시겠습니까? (오프라인 모드는 정보를 자동으로 불러오지 못합니다)
+              <p className="text-[11px] text-zinc-300 leading-relaxed font-medium">
+                Gemini API 키가 설정되지 않았습니다. AI 기능을 사용하여 정보를 자동으로 스크랩하시겠습니까? <br/>
+                <span className="text-zinc-500 font-bold italic mt-2 block">오프라인 모드로 전환하면 수동으로만 추가 가능합니다. (오프라인 모드는 정보를 자동으로 불러오지 못합니다)</span>
               </p>
             </div>
           </div>
@@ -3296,19 +3314,23 @@ export default function App() {
           <div className="grid grid-cols-2 gap-3 pt-2">
             <button
               onClick={handleGoToApiSettings}
-              className="flex items-center justify-center gap-2 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-black text-[10px] uppercase tracking-widest transition-all border border-white/5"
+              className="flex items-center justify-center gap-2 py-4 bg-zinc-800 hover:bg-zinc-700 text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all border border-white/5 rounded-sm shadow-xl"
             >
-              <Key className="w-3.5 h-3.5" />
+              <Key className="w-4 h-4 text-zinc-400" />
               API 입력
             </button>
             <button
               onClick={handleOfflineMode}
-              className="flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-blue-900/20"
+              className="flex items-center justify-center gap-2 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all shadow-2xl shadow-blue-900/40 rounded-sm"
             >
-              <Monitor className="w-3.5 h-3.5" />
+              <Monitor className="w-4 h-4" />
               오프라인 모드 사용
             </button>
           </div>
+          
+          <p className="text-[9px] text-center text-zinc-600 font-bold uppercase tracking-tighter">
+            나중에 설정 메뉴의 '정보/API' 탭에서 언제든지 변경할 수 있습니다.
+          </p>
         </div>
       </Modal>
 

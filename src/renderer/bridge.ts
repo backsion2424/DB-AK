@@ -70,7 +70,7 @@ export const electronBridge = isElectron ? (window as any).electron : {
             return {
               ...data,
               rating: 0,
-              id: Date.now().toString()
+              id: Date.now().toString() + '_' + Math.random().toString(36).substring(2, 9)
             };
           } catch (e) {
             console.error("JSON Parse Error in Gemini Scrape:", e, "Raw text:", text);
@@ -82,7 +82,14 @@ export const electronBridge = isElectron ? (window as any).electron : {
         throw err; // Re-throw to show to user
       }
     }
-    return { code, title: `AI Data for ${code} (Mock)`, actors: ['Mock Actor'], tags: ['Mock Tag'], rating: 4 };
+    return { 
+      code, 
+      title: `AI Data for ${code} (Mock)`, 
+      actors: ['Mock Actor'], 
+      tags: ['Mock Tag'], 
+      rating: 4,
+      id: Date.now().toString() + '_' + Math.random().toString(36).substring(2, 9)
+    };
   },
   generateThumbnail: async () => 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=300&h=200&fit=crop',
   getVideoInfo: async () => ({ format: { duration: 120, size: 1024 * 1024 * 500 } }),

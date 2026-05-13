@@ -1,5 +1,5 @@
 import React from 'react';
-import { Grid as VirtualGrid } from 'react-window';
+import { FixedSizeGrid as Grid } from 'react-window';
 import { Video } from '../types';
 import { VideoItem } from './UI';
 
@@ -46,14 +46,16 @@ export const VirtualVideoGrid: React.FC<VideoGridProps> = ({
   };
 
   return (
-    <VirtualGrid
+    <Grid
       columnCount={gridCols}
       columnWidth={columnWidth}
       rowCount={rowCount}
       rowHeight={rowHeight}
-      style={{ overflowX: 'hidden', height, width }}
-      cellComponent={Cell}
-      cellProps={{}}
-    />
+      height={height}
+      width={width}
+      style={{ overflowX: 'hidden' }}
+    >
+      {Cell}
+    </Grid>
   );
 };
