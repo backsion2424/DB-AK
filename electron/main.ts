@@ -1,120 +1,95 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
-import path from 'path';
-import isDev from 'electron-is-dev';
-import { initializeDB, videoRepo } from './db';
-import { scrapeWithAI } from './gemini';
-import fs from 'fs';
-import log from 'electron-log';
+import { app, BrowserWindow, shell, protocol, net, ipcMain } from 'electron';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { initDb } from './db';
+import { registerIpc } from './ipc';
+import { scrapeMetadata } from './gemini';
+import { getSetting, setSetting, deleteSetting } from './settings';
+import { openFolder, openFiles, openInExternalPlayer, revealInFolder } from './files';
+
+const isDev = !app.isPackaged;
+const VITE_DEV_URL = 'http://localhost:3000';
 
 let mainWindow: BrowserWindow | null = null;
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'media',
+    privileges: { secure: true, supportFetchAPI: true, stream: true, bypassCSP: true },
+  },
+]);
+
 function createWindow() {
-    mainWindow = new BrowserWindow({
-        width: 1280,
-        height: 800,
-        backgroundColor: '#000000',
-        show: false,
-        webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: true,
-        },
-    });
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1024,
+    minHeight: 700,
+    backgroundColor: '#0a0a0a',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
 
-    const startURL = isDev
-        ? 'http://localhost:3000'
-        : `file://${path.join(__dirname, '../dist/index.html')}`;
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
-    mainWindow.loadURL(startURL);
+  if (isDev) {
+    mainWindow.loadURL(VITE_DEV_URL);
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
 
-    mainWindow.once('ready-to-show', () => {
-        mainWindow?.show();
-    });
-
-    mainWindow.on('closed', () => {
-        mainWindow = null;
-    });
-
-    // Development tools
-    if (isDev) {
-        mainWindow.webContents.openDevTools();
-    }
-    
-    // Performance: WebContents cache and background throttling
-    mainWindow.webContents.setBackgroundThrottling(false);
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
-import { generateThumbnail, getVideoMetadata } from './video';
+app.whenReady().then(() => {
+  protocol.handle('media', async (request) => {
+    try {
+      const url = new URL(request.url);
+      let filePath = decodeURIComponent(url.pathname);
+      if (/^\/[A-Za-z]:/.test(filePath)) filePath = filePath.slice(1);
+      return await net.fetch(pathToFileURL(filePath).toString());
+    } catch (err) {
+      return new Response('Not Found', { status: 404 });
+    }
+  });
 
-ipcMain.handle('generate-thumbnail', async (_, videoPath, videoId) => {
-    return generateThumbnail(videoPath, videoId);
-});
+  initDb();
+  registerIpc();
 
-ipcMain.handle('get-video-info', async (_, videoPath) => {
-    return getVideoMetadata(videoPath);
-});
+  // settings IPC
+  ipcMain.handle('settings:get', (_e, key: string) => getSetting(key));
+  ipcMain.handle('settings:set', (_e, key: string, value: any) => setSetting(key, value));
+  ipcMain.handle('settings:delete', (_e, key: string) => deleteSetting(key));
 
-app.on('ready', () => {
-    initializeDB();
-    createWindow();
+  // gemini IPC
+  ipcMain.handle('gemini:scrape', (_e, code: string) => scrapeMetadata(code));
+
+  // files IPC
+  ipcMain.handle('files:openFolder', async () => openFolder(mainWindow));
+  ipcMain.handle('files:openFiles', async () => openFiles(mainWindow));
+  ipcMain.handle('files:openInExternalPlayer', (_e, absPath: string, customPlayer?: string) =>
+    openInExternalPlayer(absPath, customPlayer),
+  );
+  ipcMain.handle('files:revealInFolder', (_e, absPath: string) => revealInFolder(absPath));
+
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
 });
 
 app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
-});
-
-app.on('activate', () => {
-    if (mainWindow === null) {
-        createWindow();
-    }
-});
-
-// IPC Implementation
-ipcMain.handle('get-videos', async () => {
-    return videoRepo.getAll();
-});
-
-ipcMain.handle('save-video', async (_, video) => {
-    return videoRepo.save(video);
-});
-
-ipcMain.handle('delete-video', async (_, id) => {
-    return videoRepo.delete(id);
-});
-
-ipcMain.handle('scrape-metadata', async (_, code) => {
-    return scrapeWithAI(code);
-});
-
-ipcMain.handle('select-directory', async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
-        properties: ['openDirectory'],
-    });
-    return result.canceled ? null : result.filePaths[0];
-});
-
-ipcMain.handle('open-external-player', async (_, videoPath, playerPath) => {
-    if (playerPath) {
-        // Execute path directly if custom player is set
-        // Note: For security, we should validate the playerPath
-        shell.openExternal(`file://${videoPath}`); // Placeholder for direct execution
-    } else {
-        shell.openPath(videoPath);
-    }
-});
-
-ipcMain.handle('get-version', () => {
-    return app.getVersion();
-});
-
-// Global Error Handling
-process.on('uncaughtException', (error) => {
-    log.error('Uncaught Exception:', error);
-});
-
-process.on('unhandledRejection', (reason) => {
-    log.error('Unhandled Rejection:', reason);
+  if (process.platform !== 'darwin') app.quit();
 });

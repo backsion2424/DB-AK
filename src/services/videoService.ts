@@ -1,6 +1,17 @@
-import { electronBridge as electron } from '../renderer/bridge';
+import { Video } from '../types';
 
-export const addVideo = (v: any) => electron.saveVideo(v);
-export const updateVideo = (id: any, v: any) => electron.saveVideo({ ...v, id });
-export const deleteVideo = (id: any) => electron.deleteVideo(id);
-export const getVideosByUserId = () => electron.getVideos();
+export async function listVideos(): Promise<Video[]> {
+  return (await window.electron.videos.list()) as Video[];
+}
+
+export async function addVideo(video: Omit<Video, 'id' | 'createdAt' | 'userId'>) {
+  return await window.electron.videos.add(video);
+}
+
+export async function deleteVideo(id: string) {
+  return await window.electron.videos.delete(id);
+}
+
+export async function updateVideo(id: string, data: Partial<Video>) {
+  return await window.electron.videos.update(id, data);
+}

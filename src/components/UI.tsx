@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Tag, Users, Calendar, Clock, Star, Trash2, ExternalLink, Search, Plus, Filter, LayoutGrid, List, Info, X, ChevronDown, ChevronRight, FolderOpen, Settings, Search as SearchIcon, Wrench, Menu, Minimize2, Square, X as CloseIcon, Database, Maximize2, Volume2, MoreVertical, AlertTriangle } from 'lucide-react';
-import { Video } from '../types';
+import { Play, Star, ExternalLink, Plus, Info, X, ChevronDown, ChevronRight, FolderOpen, Settings, Minimize2, Square, X as CloseIcon, Database, AlertTriangle } from 'lucide-react';
+import { Video, LocalFile } from '../types';
 
 export const VideoListItem = React.memo(({ 
   video, 
@@ -10,8 +10,7 @@ export const VideoListItem = React.memo(({
   onDoubleClick, 
   onPlay, 
   onContextMenu,
-  scale = 1,
-  isMissing
+  scale = 1
 }: { 
   video: Video, 
   isSelected: boolean, 
@@ -19,8 +18,7 @@ export const VideoListItem = React.memo(({
   onDoubleClick: () => void, 
   onPlay?: (v: Video) => void,
   onContextMenu?: (e: React.MouseEvent, v: Video) => void,
-  scale?: number,
-  isMissing?: boolean
+  scale?: number
 }) => {
   const [hoverIndex, setHoverIndex] = React.useState(-1);
   const hoverTimerRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -70,11 +68,6 @@ export const VideoListItem = React.memo(({
             className="w-full h-full object-cover transition-opacity duration-300" 
             referrerPolicy="no-referrer" 
           />
-        )}
-        {isMissing && (
-          <div className="absolute inset-0 bg-red-950/40 flex items-center justify-center border-2 border-red-500/50">
-            <span className="text-[8px] font-black text-red-500 bg-black/80 px-1 py-0.5 rounded-sm uppercase tracking-tighter">미존재</span>
-          </div>
         )}
       </div>
       <span className="font-black text-zinc-300 tracking-widest truncate" style={{ fontSize: fontSize }}>{video.code}</span>
@@ -131,27 +124,19 @@ export const StarRating = React.memo(({ rating = 0, size = 12 }: { rating?: numb
 interface VideoPlayerProps {
   video: Video;
   onClose: () => void;
-  cachedFile?: File;
-  onFileSelect?: (f: File) => void;
-  onLoadError?: (id: string) => void;
+  cachedFile?: LocalFile;
+  onFileSelect?: (f: LocalFile) => void;
   key?: React.Key;
 }
 
-export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadError }: VideoPlayerProps) => {
-  const [file, setFile] = React.useState<File | null>(cachedFile || null);
+export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect }: VideoPlayerProps) => {
+  const [file, setFile] = React.useState<LocalFile | null>(cachedFile || null);
   const [videoSrc, setVideoSrc] = React.useState<string>('');
   const [duration, setDuration] = React.useState(0);
   const [currentTime, setCurrentTime] = React.useState(0);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const videoRef = React.useRef<HTMLVideoElement>(null);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  React.useEffect(() => {
-    if (loadError && onLoadError && video.id) {
-       onLoadError(video.id);
-    }
-  }, [loadError, onLoadError, video.id]);
-  
   React.useEffect(() => {
     setFile(cachedFile || null);
     setLoadError(null);
@@ -160,7 +145,7 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
   React.useEffect(() => {
     let url = '';
     if (file) {
-      url = URL.createObjectURL(file);
+      url = window.electron.files.toMediaUrl(file.absPath);
     } else if (video.videoUrl) {
       url = video.videoUrl;
     } else if ((video as any).previewVideoUrl) {
@@ -169,28 +154,16 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
 
     setVideoSrc(url);
     setLoadError(null);
-
-    return () => {
-      if (url && url.startsWith('blob:')) {
-        URL.revokeObjectURL(url);
-      }
-    };
   }, [file, video.videoUrl, (video as any).previewVideoUrl]);
 
-  const handleFileChange = (selected: File) => {
-    setFile(selected);
-    if (onFileSelect) onFileSelect(selected);
-  };
-
-  React.useEffect(() => {
-    // If no video source is available, automatically trigger the file picker
-    if (!videoSrc && !loadError) {
-      const timer = setTimeout(() => {
-        fileInputRef.current?.click();
-      }, 500);
-      return () => clearTimeout(timer);
+  const pickLocalFile = async () => {
+    const files = await window.electron.files.openFiles();
+    if (files.length > 0) {
+      const selected = files[0];
+      setFile(selected);
+      if (onFileSelect) onFileSelect(selected);
     }
-  }, [videoSrc, loadError]);
+  };
 
   React.useEffect(() => {
     if (videoRef.current && videoSrc) {
@@ -204,34 +177,20 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
 
   return (
     <div className="flex flex-col h-full bg-black rounded-sm overflow-hidden border border-white/5 shadow-2xl">
-      <div 
+      <div
         className="relative aspect-video bg-black flex items-center justify-center group overflow-hidden"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          const droppedFile = e.dataTransfer.files[0];
-          if (droppedFile && droppedFile.type.startsWith('video/')) {
-            handleFileChange(droppedFile);
-          }
-        }}
       >
         {videoSrc ? (
           <>
             <video 
               ref={videoRef}
               src={videoSrc} 
-              className="w-full h-full cursor-pointer" 
+              className="w-full h-full" 
+              controls 
               autoPlay
               muted
               playsInline
-              controls={false}
               preload="auto"
-              onClick={() => {
-                if (videoRef.current) {
-                  if (videoRef.current.paused) videoRef.current.play();
-                  else videoRef.current.pause();
-                }
-              }}
               crossOrigin={videoSrc.startsWith('blob:') ? undefined : 'anonymous'}
               onLoadedMetadata={(e) => {
                 setDuration(e.currentTarget.duration);
@@ -244,23 +203,10 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
                 e.currentTarget.play().catch(() => {});
               }}
               onError={(e) => {
-                const v = videoRef.current;
-                const errorCode = v?.error?.code;
-                const errorMsg = v?.error?.message;
-                console.error("VideoPlayer Render Error:", e.type, "Code:", errorCode, "Msg:", errorMsg);
-                
+                console.error("VideoPlayer Render Error:", e.type);
                 // Only set error if it's not a temporary stall
-                if (v && v.error) {
-                  let userMsg = "동영상을 불러오는데 실패했습니다.";
-                  if (errorCode === 4) {
-                    userMsg += " 파일 형식이 지원되지 않거나 접근 권한이 없을 수 있습니다.";
-                    if (videoSrc && (videoSrc.startsWith('/') || videoSrc.includes(':'))) {
-                       userMsg += " (로컬 경로 파일은 직접 재생할 수 없습니다.)";
-                    }
-                  } else if (errorCode === 2) {
-                    userMsg += " 네트워크 오류가 발생했습니다.";
-                  }
-                  setLoadError(userMsg);
+                if (videoRef.current && videoRef.current.error) {
+                  setLoadError("동영상을 불러오는데 실패했습니다. 파일 형식이 지원되지 않거나 접근 권한이 없을 수 있습니다.");
                 }
               }}
               onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
@@ -275,7 +221,7 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
                   <p className="text-zinc-500 text-[10px]">로컬 파일을 다시 연결하거나 다른 파일을 선택해 주세요.</p>
                 </div>
                 <button 
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={pickLocalFile}
                   className="mt-2 bg-zinc-800 text-white px-6 py-2 rounded-sm text-[10px] font-black uppercase tracking-widest hover:bg-zinc-700 transition-colors"
                 >
                   다른 파일 연결하기
@@ -285,9 +231,9 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
           </>
         ) : (
           <div className="flex flex-col items-center gap-6 p-12 text-center max-w-sm">
-            <div 
+            <div
               className="w-24 h-24 rounded-full bg-blue-600/5 border border-blue-600/20 flex items-center justify-center animate-pulse cursor-pointer hover:bg-blue-600/10 transition-colors"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={pickLocalFile}
             >
               <Play className="w-12 h-12 text-blue-500/50 ml-1" />
             </div>
@@ -298,16 +244,12 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
                 아래 버튼을 눌러 파일을 연결하세요.
               </p>
             </div>
-            <button 
-              onClick={() => fileInputRef.current?.click()}
+            <button
+              onClick={pickLocalFile}
               className="bg-blue-600 text-white px-10 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.2em] hover:bg-blue-500 transition-all shadow-lg shadow-blue-900/20"
             >
               파일 연결하기
             </button>
-            <input ref={fileInputRef} type="file" className="hidden" accept="video/*" onChange={(e) => {
-              const selected = e.target.files?.[0];
-              if (selected) handleFileChange(selected);
-            }} />
           </div>
         )}
 
@@ -345,17 +287,6 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
 
            <div className="flex justify-between items-center">
              <div className="flex items-center gap-4">
-                <button 
-                  onClick={() => {
-                    if (videoRef.current) {
-                      if (videoRef.current.paused) videoRef.current.play();
-                      else videoRef.current.pause();
-                    }
-                  }}
-                  className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors group"
-                >
-                  <Play className="w-4 h-4 text-white fill-current group-active:scale-90 transition-transform" />
-                </button>
                 <div className="flex flex-col overflow-hidden">
                   <span className="text-[12px] font-black text-zinc-100 line-clamp-1">{file ? file.name : (video.title || video.code)}</span>
                   <div className="flex items-center gap-2 mt-0.5">
@@ -366,14 +297,6 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect, onLoadEr
                 </div>
              </div>
              <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => {
-                    if (videoRef.current) videoRef.current.muted = !videoRef.current.muted;
-                  }}
-                  className="p-2 text-zinc-500 hover:text-white transition-colors bg-white/5 rounded-full"
-                >
-                   <Volume2 className="w-3.5 h-3.5" />
-                </button>
                 {video.videoUrl && (
                   <button onClick={() => window.open(video.videoUrl, '_blank')} className="p-2 text-zinc-500 hover:text-white transition-colors bg-white/5 rounded-full">
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -479,8 +402,7 @@ export const VideoItem = React.memo(({
   onClick, 
   onDoubleClick, 
   onPlay, 
-  onContextMenu,
-  isMissing
+  onContextMenu 
 }: { 
   video: Video, 
   isSelected: boolean, 
@@ -488,8 +410,7 @@ export const VideoItem = React.memo(({
   onDoubleClick: () => void, 
   onPlay?: (v: Video) => void,
   onContextMenu?: (e: React.MouseEvent, v: Video) => void,
-  key?: React.Key,
-  isMissing?: boolean
+  key?: React.Key
 }) => {
   const [hoverIndex, setHoverIndex] = React.useState(-1);
   const hoverTimerRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -545,14 +466,6 @@ export const VideoItem = React.memo(({
           <div className="absolute inset-0 flex flex-col items-center justify-center text-[10px] text-zinc-800 font-black uppercase tracking-widest">
             <FolderOpen className="w-8 h-8 mb-2 opacity-10" />
             이미지 없음
-          </div>
-        )}
-
-        {isMissing && (
-          <div className="absolute inset-0 bg-red-950/40 flex items-center justify-center border-4 border-red-500/50 z-10">
-            <div className="bg-red-600 text-white px-3 py-1 text-[10px] font-black uppercase tracking-widest shadow-2xl skew-x-[-12deg]">
-              미존재 파일
-            </div>
           </div>
         )}
         
@@ -715,63 +628,58 @@ export const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-3xl"
   );
 };
 
-export const SettingsModal = ({ isOpen, onClose, onUpdate, onReset, initialTab = 'sync' }: { isOpen: boolean, onClose: () => void, onUpdate: () => void, onReset?: () => void, initialTab?: string }) => {
-  const [activeTab, setActiveTab] = React.useState(initialTab);
-  
-  React.useEffect(() => {
-    if (isOpen) {
-      setActiveTab(initialTab);
-    }
-  }, [isOpen, initialTab]);
+export const SettingsModal = ({ isOpen, onClose, onUpdate, onReset }: { isOpen: boolean, onClose: () => void, onUpdate: () => void, onReset?: () => void }) => {
+  const [activeTab, setActiveTab] = React.useState('sync');
   const [syncFolders, setSyncFolders] = React.useState<string[]>(() => JSON.parse(localStorage.getItem('sg_sync_folders') || '["H:\\\\정리"]'));
   const [playerPath, setPlayerPath] = React.useState(() => localStorage.getItem('sg_player_path') || '');
-  const [nativeProtocol, setNativeProtocol] = React.useState(() => localStorage.getItem('sg_native_protocol') || '');
-  const [usePassword, setUsePassword] = React.useState(() => localStorage.getItem('sg_use_password') === 'true');
-  const [offlineMode, setOfflineMode] = React.useState(() => localStorage.getItem('sg_offline_mode') === 'true');
-  const [geminiApiKey, setGeminiApiKey] = React.useState(() => localStorage.getItem('gemini_api_key') || '');
-  const [newPassword, setNewPassword] = React.useState('');
-  const [confirmPassword, setConfirmPassword] = React.useState('');
+  const [geminiKey, setGeminiKey] = React.useState('');
+  const [geminiKeySaved, setGeminiKeySaved] = React.useState(false);
 
   // Base Settings
   const [fontSize, setFontSize] = React.useState(() => localStorage.getItem('db_font_size') || '11');
   const [fontFamily, setFontFamily] = React.useState(() => localStorage.getItem('db_font_family') || 'Inter');
   const [aspectRatio, setAspectRatio] = React.useState(() => localStorage.getItem('db_aspect_ratio') || '16/9 [FHD]');
 
-  const saveSettings = () => {
+  React.useEffect(() => {
+    if (!isOpen) return;
+    window.electron.settings.get<string>('geminiApiKey').then((v) => {
+      setGeminiKeySaved(!!v);
+      setGeminiKey('');
+    });
+  }, [isOpen]);
+
+  const saveSettings = async () => {
     localStorage.setItem('sg_sync_folders', JSON.stringify(syncFolders));
     localStorage.setItem('sg_player_path', playerPath);
-    localStorage.setItem('sg_native_protocol', nativeProtocol);
-    localStorage.setItem('sg_use_password', usePassword.toString());
-    localStorage.setItem('sg_offline_mode', offlineMode.toString());
-    localStorage.setItem('gemini_api_key', geminiApiKey);
-    
+
     localStorage.setItem('db_font_size', fontSize);
     localStorage.setItem('db_font_family', fontFamily);
     localStorage.setItem('db_aspect_ratio', aspectRatio);
 
-    if (usePassword && newPassword) {
-      if (newPassword === confirmPassword) {
-        localStorage.setItem('sg_app_password', newPassword);
-      } else {
-        alert('비밀번호가 일치하지 않습니다.');
-        return;
-      }
+    if (geminiKey.trim()) {
+      await window.electron.settings.set('geminiApiKey', geminiKey.trim());
     }
     onUpdate();
     onClose();
+  };
+
+  const clearGeminiKey = async () => {
+    await window.electron.settings.delete('geminiApiKey');
+    setGeminiKey('');
+    setGeminiKeySaved(false);
   };
 
   const tabs = [
     { id: 'sync', label: '동기화 폴더' },
     { id: 'base', label: '기본설정' },
     { id: 'player', label: 'Player 설정' },
-    { id: 'password', label: '패스워드' },
+    { id: 'gemini', label: 'AI 키' },
     { id: 'advanced', label: '고급/초기화' },
     { id: 'version', label: '정보' }
   ];
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="프로그램 설정" maxWidth="max-w-2xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="DB Archive 설정" maxWidth="max-w-2xl">
       <div className="flex flex-col gap-6">
         <div className="flex bg-[#121212] border border-white/[0.05] p-0.5 rounded-sm">
           {tabs.map(tab => (
@@ -796,7 +704,7 @@ export const SettingsModal = ({ isOpen, onClose, onUpdate, onReset, initialTab =
                 </div>
               </div>
               <div className="border border-white/[0.07] bg-black p-4 space-y-2 text-center">
-                 <p className="text-[10px] text-zinc-600 mb-4 font-bold">브라우저 환경에서는 로컬 폴더를 직접 감시할 수 없습니다. [폴더 가져오기]를 사용하세요.</p>
+                 <p className="text-[10px] text-zinc-600 mb-4 font-bold">동기화 폴더를 등록해 두면 [폴더 가져오기] 시 빠르게 선택할 수 있습니다.</p>
                 {syncFolders.map((folder, idx) => (
                   <div key={idx} className="flex items-center justify-between bg-zinc-900 border border-white/[0.05] p-2">
                     <span className="text-[11px] font-mono text-zinc-400">{folder}</span>
@@ -867,142 +775,47 @@ export const SettingsModal = ({ isOpen, onClose, onUpdate, onReset, initialTab =
           {activeTab === 'player' && (
             <div className="space-y-6">
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">지정 플레이어 경로</label>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={playerPath}
-                    onChange={(e) => setPlayerPath(e.target.value)}
-                    placeholder="C:\Program Files\..."
-                    className="flex-1 bg-black border border-white/[0.07] rounded-sm p-3 text-[11px] font-mono text-white outline-none focus:border-blue-600"
-                  />
-                  <button className="px-6 bg-zinc-800 text-[10px] font-bold text-white hover:bg-zinc-700 transition-colors">찾기</button>
-                </div>
-                
-                <div className="flex flex-wrap gap-2 mt-4">
-                  <button 
-                    onClick={() => { setPlayerPath(''); setNativeProtocol(''); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-blue-500/30 hover:border-blue-500 hover:bg-blue-500/5 transition-all group"
-                  >
-                    <div className="w-5 h-5 bg-blue-600 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">D</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">기본 플레이어</span>
-                  </button>
-                  <button 
-                    onClick={() => { setPlayerPath('C:\\Program Files (x86)\\GOM\\GOMPlayer\\GOM.EXE'); setNativeProtocol('gomplayer://'); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 hover:border-orange-500/50 hover:bg-orange-500/5 transition-all group"
-                  >
-                    <div className="w-5 h-5 bg-orange-600 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">G</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">GOM Player</span>
-                  </button>
-                  <button 
-                    onClick={() => { setPlayerPath('C:\\Program Files\\KMPlayer\\KMPlayer.exe'); setNativeProtocol('kmplayer://'); }}
-                    className={`flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all group`}
-                  >
-                    <div className="w-5 h-5 bg-purple-600 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">K</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">KMPlayer</span>
-                  </button>
-                  <button 
-                    onClick={() => { setPlayerPath('C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe'); setNativeProtocol('potplayer://'); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 hover:border-yellow-500/50 hover:bg-yellow-500/5 transition-all group"
-                  >
-                    <div className="w-5 h-5 bg-yellow-600 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">P</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">PotPlayer</span>
-                  </button>
-                  <button 
-                    onClick={() => { setPlayerPath('C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe'); setNativeProtocol('vlc://'); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 hover:border-orange-400/50 hover:bg-orange-400/5 transition-all group"
-                  >
-                    <div className="w-5 h-5 bg-orange-500 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">V</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">VLC Player</span>
-                  </button>
-                  <button 
-                    onClick={() => { setPlayerPath('C:\\Program Files\\MPC-HC\\mpc-hc64.exe'); setNativeProtocol('mpc-hc://'); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 hover:border-green-500/50 hover:bg-green-500/5 transition-all group"
-                  >
-                    <div className="w-5 h-5 bg-green-600 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">M</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">MPC-HC</span>
-                  </button>
-                  <button 
-                    onClick={() => { setPlayerPath('C:\\Program Files (x86)\\Kakao\\KakaoTV\\KakaoTV.exe'); setNativeProtocol('kakaotv://'); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 hover:border-yellow-400/50 hover:bg-yellow-400/5 transition-all group"
-                  >
-                    <div className="w-5 h-5 bg-yellow-400 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">K</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">KakaoTV</span>
-                  </button>
-                  <button 
-                    onClick={() => { setPlayerPath('C:\\Program Files (x86)\\Naver\\NaverMediaPlayer\\NaverMediaPlayer.exe'); setNativeProtocol('naverplayer://'); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 hover:border-green-400/50 hover:bg-green-400/5 transition-all group"
-                  >
-                    <div className="w-5 h-5 bg-green-400 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">N</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">Naver Player</span>
-                  </button>
-                  <button 
-                    onClick={() => { setPlayerPath('C:\\Program Files (x86)\\SodaPlayer\\SodaPlayer.exe'); setNativeProtocol('sodaplayer://'); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 hover:border-blue-400/50 hover:bg-blue-400/5 transition-all group"
-                  >
-                    <div className="w-5 h-5 bg-blue-400 rounded-sm flex items-center justify-center text-[10px] font-black text-white group-hover:scale-110 transition-transform">S</div>
-                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">Soda Player</span>
-                  </button>
-                </div>
-
-                <div className="mt-4 p-3 bg-red-950/20 border border-red-500/20 rounded-sm flex gap-3">
-                  <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-red-200/60 leading-relaxed font-bold italic">
-                    주의: 플레이어가 기본 설치 위치와 다른 곳에 설치되어 있다면 동작하지 않을 수 있습니다.
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">실행 프로토콜 (PotPlayer, VLC 등)</label>
-                <input 
-                  type="text" 
-                  value={nativeProtocol}
-                  onChange={(e) => setNativeProtocol(e.target.value)}
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">외부 플레이어 실행 파일 경로 (선택)</label>
+                <input
+                  type="text"
+                  value={playerPath}
+                  onChange={(e) => setPlayerPath(e.target.value)}
                   className="w-full bg-black border border-white/[0.07] rounded-sm p-3 text-[11px] font-mono text-white outline-none focus:border-blue-600"
-                  placeholder="potplayer://"
+                  placeholder="C:\Program Files\DAUM\PotPlayer\PotPlayer.exe"
                 />
               </div>
-              <p className="text-[10px] text-zinc-600 italic">브라우저 환경에서는 로컬 파일을 직접 실행할 수 없으므로, 스트리밍 URL이 있을 때나 커스텀 프로토콜 핸들러가 설치된 경우에만 외부 플레이어 호출이 가능합니다.</p>
+              <p className="text-[10px] text-zinc-600 italic">
+                비워두면 OS 기본 연결 프로그램으로 열립니다. 경로를 지정하면 해당 실행 파일에 영상 절대경로를 인자로 넘깁니다.
+              </p>
             </div>
           )}
 
-          {activeTab === 'password' && (
+          {activeTab === 'gemini' && (
             <div className="space-y-6">
-              <p className="text-[11px] font-bold text-zinc-400">패스워드 기능을 사용 할 수 있습니다. (패스워드 찾기 기능은 없습니다! 꼭 기억하세요!)</p>
-              <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox" 
-                  id="use-pass"
-                  checked={usePassword}
-                  onChange={(e) => setUsePassword(e.target.checked)}
-                  className="w-4 h-4 bg-black border-zinc-700 rounded-sm"
+              <p className="text-[11px] font-bold text-zinc-400">
+                품번으로 메타데이터 자동 수집 시 사용되는 Google Gemini API 키를 입력하세요.
+                키는 로컬에만 저장되며 외부로 전송되지 않습니다.
+              </p>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                  GEMINI API KEY {geminiKeySaved && <span className="text-emerald-500">· 저장됨</span>}
+                </label>
+                <input
+                  type="password"
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  placeholder={geminiKeySaved ? '••••• (변경하려면 새 키 입력)' : 'AIza...'}
+                  className="w-full bg-black border border-white/[0.07] rounded-sm p-3 text-[11px] font-mono text-white outline-none focus:border-blue-600"
                 />
-                <label htmlFor="use-pass" className="text-[11px] font-bold text-zinc-200">패스워드 사용</label>
               </div>
-              
-              <div className={`space-y-4 transition-opacity ${usePassword ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
-                <div className="grid grid-cols-[100px_1fr] items-center gap-4">
-                  <span className="text-[11px] font-bold text-zinc-500">패스워드</span>
-                  <input 
-                    type="password" 
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="bg-black border border-white/[0.07] rounded-sm p-2 text-[11px] text-white outline-none focus:border-red-600"
-                  />
-                </div>
-                <div className="grid grid-cols-[100px_1fr] items-center gap-4">
-                  <span className="text-[11px] font-bold text-zinc-500">패스워드 확인</span>
-                  <input 
-                    type="password" 
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="bg-black border border-white/[0.07] rounded-sm p-2 text-[11px] text-white outline-none focus:border-red-600"
-                  />
-                </div>
-                <div className="flex justify-center pt-10">
-                   <button onClick={() => setUsePassword(true)} className="px-10 py-2 bg-zinc-800 border border-white/[0.05] text-[11px] font-black uppercase text-zinc-400 hover:bg-zinc-700 transition-all">패스워드 설정</button>
-                </div>
-              </div>
+              {geminiKeySaved && (
+                <button
+                  onClick={clearGeminiKey}
+                  className="px-6 py-2 bg-red-600/10 border border-red-600/40 text-red-400 text-[10px] font-black uppercase tracking-widest hover:bg-red-600/20 transition-all"
+                >
+                  저장된 키 삭제
+                </button>
+              )}
             </div>
           )}
 
@@ -1010,17 +823,17 @@ export const SettingsModal = ({ isOpen, onClose, onUpdate, onReset, initialTab =
             <div className="space-y-6">
               <div className="p-4 bg-red-950/20 border border-red-500/20 rounded-sm">
                 <h4 className="text-[11px] font-black text-red-500 uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <AlertTriangle className="w-3 h-3" /> 프로그램 공장 초기화
+                  <AlertTriangle className="w-3 h-3" /> 어플리케이션 공장 초기화
                 </h4>
                 <p className="text-[10px] text-zinc-500 leading-relaxed mb-4">
                   모든 설정, 로컬 캐시, 성인인증 상태, 검색 기록 등을 완전히 초기화합니다. <br/>
-                  Firestore에 저장된 영상 데이터는 삭제되지 않지만 다시 로그인/검색이 필요할 수 있습니다.
+                  로컬 DB에 저장된 영상 데이터는 삭제되지 않지만 다시 검색이 필요할 수 있습니다.
                 </p>
                 <button 
                   onClick={onReset}
                   className="w-full py-3 bg-red-600/10 border border-red-600/50 text-red-500 text-[10px] font-black uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all"
                 >
-                  프로그램 전체 초기화
+                  어플리케이션 전체 초기화
                 </button>
               </div>
               
@@ -1035,70 +848,24 @@ export const SettingsModal = ({ isOpen, onClose, onUpdate, onReset, initialTab =
           )}
 
           {activeTab === 'version' && (
-            <div className="flex-1 flex flex-col items-center justify-center py-6 px-10">
-              <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-                <div className="space-y-4 bg-black/40 border border-white/[0.05] p-6 rounded-sm">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-blue-500">Gemini API Key</label>
-                  <p className="text-[9px] text-zinc-500 mb-2 leading-relaxed">
-                    AI 기반 정보 스크랩 및 설명을 위해 구글 Gemini API 키가 필요합니다.
-                  </p>
-                  <input 
-                    type="password" 
-                    value={geminiApiKey}
-                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                    placeholder="API 키를 입력하세요"
-                    className="w-full bg-[#0a0a0a] border border-white/[0.1] rounded-sm p-3 text-[11px] font-mono text-zinc-300 outline-none focus:border-blue-600 focus:bg-black transition-all"
-                  />
-                  <div className="flex justify-end mt-2">
-                    <a 
-                      href="https://aistudio.google.com/app/apikey" 
-                      target="_blank" 
-                      rel="noreferrer"
-                      className="text-[9px] font-black text-zinc-600 hover:text-blue-500 uppercase tracking-tighter transition-colors"
-                    >
-                      키 발급받기 →
-                    </a>
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-4 mt-2 border-t border-white/5">
-                    <input 
-                      type="checkbox" 
-                      id="opt-offline-settings"
-                      checked={offlineMode}
-                      onChange={(e) => setOfflineMode(e.target.checked)}
-                      className="w-3 h-3 accent-blue-600 cursor-pointer"
-                    />
-                    <div className="flex flex-col">
-                      <label htmlFor="opt-offline-settings" className="text-[10px] font-bold text-zinc-300 cursor-pointer">
-                        오프라인 모드 상시 사용
-                      </label>
-                      <span className="text-[9px] text-zinc-600">AI 정보 스크랩 기능을 사용하지 않고 수동으로 추가합니다.</span>
-                    </div>
-                  </div>
+            <div className="flex-1 flex items-center justify-center py-10">
+              <div className="flex items-center gap-10">
+                <div className="w-32 h-32 bg-blue-600 border border-white/[0.05] rounded-2xl flex flex-col items-center justify-center p-4 shadow-2xl">
+                   <div className="text-4xl font-black text-white leading-none">DB</div>
+                   <div className="text-[10px] font-black text-zinc-200 uppercase tracking-widest mt-1">ARCHIVE</div>
                 </div>
-
-                <div className="flex items-center gap-6">
-                  <div className="w-24 h-24 bg-blue-600 border border-white/[0.05] rounded-2xl flex flex-col items-center justify-center p-4 shadow-2xl shrink-0">
-                     <div className="text-3xl font-black text-white leading-none">DB</div>
-                     <div className="text-[8px] font-black text-zinc-200 uppercase tracking-widest mt-1">ARCHIVE</div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-lg font-black text-white uppercase tracking-tight">DB Archive v1.12.2</div>
-                    <div className="text-[9px] font-bold text-zinc-600 uppercase tracking-[0.2em] leading-loose">Personal Video Library<br/>Powered by Google AI</div>
-                  </div>
+                <div className="space-y-4">
+                  <div className="text-xl font-black text-white uppercase tracking-tight">DB Archive v1.12.2</div>
+                  <div className="text-[10px] font-bold text-zinc-600 uppercase tracking-[0.25em]">Personal Video Library</div>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {activeTab !== 'version' ? (
+        {activeTab !== 'version' && (
           <div className="flex justify-end pt-4 border-t border-white/[0.03]">
              <button onClick={saveSettings} className="px-10 py-3 bg-blue-600 font-black text-white text-[11px] uppercase tracking-widest shadow-lg shadow-blue-700/20 hover:bg-blue-500 transition-all">설정 저장</button>
-          </div>
-        ) : (
-          <div className="flex justify-end pt-4 border-t border-white/[0.03]">
-             <button onClick={saveSettings} className="px-10 py-3 bg-zinc-800 font-black text-white text-[11px] uppercase tracking-widest shadow-lg hover:bg-blue-600 transition-all">API 키 및 설정 저장</button>
           </div>
         )}
       </div>

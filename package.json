@@ -1,78 +1,72 @@
 {
-  "name": "ai-video-manager-desktop",
+  "name": "db-archive",
   "private": true,
-  "version": "1.0.0",
-  "main": "dist-electron/main.js",
+  "version": "0.1.0",
   "type": "module",
+  "main": "dist-electron/main.js",
+  "engines": {
+    "node": "20.x || 22.x"
+  },
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && electron-builder",
+    "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist dist-electron",
+    "clean": "rimraf dist dist-electron release",
     "lint": "tsc --noEmit",
-    "electron": "vite",
-    "dist": "electron-builder"
+    "postinstall": "electron-builder install-app-deps",
+    "electron:tsc": "tsc -p electron && node scripts/post-electron-build.mjs",
+    "electron:dev": "concurrently -k -n vite,electron -c blue,green \"npm run dev\" \"wait-on http://localhost:3000 && npm run electron:tsc && cross-env NODE_ENV=development electron .\"",
+    "electron:build": "npm run build && npm run electron:tsc && electron-builder"
+  },
+  "dependencies": {
+    "@google/genai": "^2.0.1",
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "better-sqlite3": "^11.5.0",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.14.0",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^4.1.14",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3",
+    "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "com.aivideomanager.app",
-    "productName": "AI Video Manager",
+    "appId": "com.dasu.db-archive",
+    "productName": "DB Archive",
     "directories": {
-      "output": "dist-electron/build"
+      "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
     "win": {
       "target": [
-        "portable",
-        "nsis"
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
       ],
-      "icon": "public/icon.ico"
+      "artifactName": "DB-Archive-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "${productName} Portable ${version}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "artifactName": "DB-Archive-${version}.${ext}"
     }
-  },
-  "dependencies": {
-    "@google/genai": "^2.0.1",
-    "@google/generative-ai": "^0.24.1",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "better-sqlite3": "^11.8.1",
-    "chokidar": "^4.0.3",
-    "electron-is-dev": "^3.0.1",
-    "electron-log": "^5.3.0",
-    "firebase": "^11.2.0",
-    "fluent-ffmpeg": "^2.1.3",
-    "jotai": "^2.12.1",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "react-window": "^1.8.11",
-    "sharp": "^0.33.5",
-    "vite": "^6.2.3",
-    "zod": "^3.24.2"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^11.2.2",
-    "@types/express": "^4.17.21",
-    "@types/fluent-ffmpeg": "^2.1.27",
-    "@types/node": "^22.14.0",
-    "@types/react-window": "^1.8.8",
-    "autoprefixer": "^10.4.21",
-    "electron": "^34.3.0",
-    "electron-builder": "^25.1.8",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite-plugin-electron": "^0.29.0",
-    "vite-plugin-electron-renderer": "^0.14.7"
   }
 }

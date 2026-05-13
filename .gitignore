@@ -1,8 +1,14 @@
 node_modules/
 build/
 dist/
+dist-electron/
+release/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+.vite/
+firebase-applet-config.json
+
+사용법.html

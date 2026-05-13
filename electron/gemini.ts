@@ -1,35 +1,86 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import * as dotenv from 'dotenv';
-dotenv.config();
+import { GoogleGenAI, Type } from '@google/genai';
+import { getSetting } from './settings';
 
-const API_KEY = process.env.GEMINI_API_KEY || '';
-
-if (!API_KEY) {
-    console.warn("GEMINI_API_KEY is not set. AI features may not work.");
+export interface ScrapedMetadata {
+  title: string;
+  code: string;
+  posterUrl: string;
+  studio: string;
+  releaseDate: string;
+  duration: number;
+  actors: string[];
+  tags: string[];
+  description: string;
+  videoUrl?: string;
+  previewVideoUrl?: string;
 }
 
-const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+export async function scrapeMetadata(code: string): Promise<ScrapedMetadata> {
+  if (!code || code.trim() === '') {
+    throw new Error('Invalid video code provided.');
+  }
+  const apiKey = getSetting<string>('geminiApiKey');
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY_MISSING');
+  }
+  const ai = new GoogleGenAI({ apiKey });
 
-export async function scrapeWithAI(code: string) {
-    if (!API_KEY) throw new Error("API Key missing");
+  const prompt = `Provide metadata for video code: ${code}.
+    Search for a valid preview video URL or official trailer URL if possible.
+    If you don't know the specific one, create realistic placeholder metadata in Korean.
+    The response MUST be a valid JSON object matching the requested schema.`;
 
-    const prompt = `주어진 품번(Code) "${code}" 에 대한 성인용 비디오(AV) 메타데이터를 JSON 형식으로 반환해줘.
-    포함할 필드: title, studio, releaseDate(YYYY-MM-DD), duration(seconds), actors(array), tags(array), description.
-    한국어로 답변해줘.`;
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        systemInstruction:
+          "You are a professional video library assistant. Return technical metadata in Korean for 'title' and 'description'. Always return valid JSON. If you find a video URL (trailers/previews), include it in 'videoUrl' or 'previewVideoUrl'.",
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            code: { type: Type.STRING },
+            posterUrl: { type: Type.STRING },
+            studio: { type: Type.STRING },
+            releaseDate: { type: Type.STRING, description: 'YYYY-MM-DD' },
+            duration: { type: Type.NUMBER, description: 'minutes' },
+            actors: { type: Type.ARRAY, items: { type: Type.STRING } },
+            tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+            description: { type: Type.STRING },
+            videoUrl: { type: Type.STRING },
+            previewVideoUrl: { type: Type.STRING },
+          },
+          required: ['title', 'code', 'actors', 'tags'],
+        },
+      },
+    });
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-    
-    // Simple JSON extraction
-    try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
-        }
-        return { code, title: code };
-    } catch (e) {
-        return { code, title: code };
+    const text = response.text;
+    if (!text) throw new Error('Empty response from Gemini');
+
+    const data = JSON.parse(text);
+    if (!data.posterUrl || data.posterUrl.includes('example.com')) {
+      data.posterUrl =
+        'https://images.unsplash.com/photo-1485846234645-a62644f84728?q=80&w=2059&auto=format&fit=crop';
     }
+    return data as ScrapedMetadata;
+  } catch (error: any) {
+    if (error?.message === 'GEMINI_API_KEY_MISSING') throw error;
+    console.error('Gemini API Error:', error instanceof Error ? error.message : error);
+    return {
+      title: `${code} (정보 없음)`,
+      code,
+      posterUrl:
+        'https://images.unsplash.com/photo-1485846234645-a62644f84728?q=80&w=2059&auto=format&fit=crop',
+      studio: 'Unknown',
+      releaseDate: new Date().toISOString().split('T')[0],
+      duration: 0,
+      actors: [],
+      tags: [],
+      description: '',
+    };
+  }
 }
