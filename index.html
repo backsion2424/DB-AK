@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+    <script>
+      (function() {
+        if (window.global) return;
+        
+        var _customFetch = null;
+        var _nativeFetch = window.fetch;
+        var _process = { env: {}, nextTick: function(cb) { setTimeout(cb, 0); } };
+        
+        // Define a robust fetch getter
+        var getFetch = function() {
+          var f = _customFetch || _nativeFetch;
+          if (typeof f === 'function') {
+            try { return f.bind(window); } catch (e) { return f; }
+          }
+          return f;
+        };
+
+        // Try to make window.fetch writable/configurable on the real window object
+        try {
+          var desc = Object.getOwnPropertyDescriptor(window, 'fetch');
+          if (!desc || desc.configurable) {
+            Object.defineProperty(window, 'fetch', {
+              get: getFetch,
+              set: function(v) { _customFetch = v; },
+              configurable: true,
+              enumerable: true
+            });
+          }
+        } catch (e) {}
+
+        // Create a Proxy for 'window.global' that wraps 'window'
+        window.global = new Proxy(window, {
+          get: function(target, prop) {
+            if (prop === 'global' || prop === 'globalThis' || prop === 'self') return window.global;
+            if (prop === 'process') return _process;
+            if (prop === 'fetch') return getFetch();
+            
+            var val = target[prop];
+            if (typeof val === 'function') {
+              // Don't bind constructors or native classes (often start with Uppercase)
+              if (typeof prop === 'string' && /^[A-Z]/.test(prop)) return val;
+              
+              try { return val.bind(target); } catch (e) { return val; }
+            }
+            return val;
+          },
+          set: function(target, prop, val) {
+            if (prop === 'fetch') { _customFetch = val; return true; }
+            if (prop === 'process') { _process = val; return true; }
+            try { 
+              target[prop] = val; 
+            } catch (e) { 
+              // Silently ignore or handle read-only property failures
+              if (prop === 'fetch') { _customFetch = val; }
+            }
+            return true;
+          },
+          has: function(target, prop) {
+            return prop in target || prop === 'global' || prop === 'process';
+          }
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
