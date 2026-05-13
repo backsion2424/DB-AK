@@ -1,0 +1,5 @@
+{
+  "name": "DB Archive",
+  "description": "A personal video library manager with Gemini-powered metadata scraping and Firebase synchronization.",
+  "requestFramePermissions": []
+}

@@ -144,8 +144,11 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect }: VideoP
 
   React.useEffect(() => {
     let url = '';
-    if (file) {
-      url = window.electron.files.toMediaUrl(file.absPath);
+    if (file && file.absPath.startsWith('blob:')) {
+      url = file.absPath;
+    } else if (file) {
+      // Electron preview check
+      url = window.electron ? window.electron.files.toMediaUrl(file.absPath) : file.absPath;
     } else if (video.videoUrl) {
       url = video.videoUrl;
     } else if ((video as any).previewVideoUrl) {
@@ -157,12 +160,23 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect }: VideoP
   }, [file, video.videoUrl, (video as any).previewVideoUrl]);
 
   const pickLocalFile = async () => {
-    const files = await window.electron.files.openFiles();
-    if (files.length > 0) {
-      const selected = files[0];
-      setFile(selected);
-      if (onFileSelect) onFileSelect(selected);
-    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.onchange = (e) => {
+      const selectedFile = (e.target as HTMLInputElement).files?.[0];
+      if (selectedFile) {
+        const url = URL.createObjectURL(selectedFile);
+        const localFile: LocalFile = {
+            name: selectedFile.name,
+            absPath: url,
+            size: selectedFile.size
+        };
+        setFile(localFile);
+        if (onFileSelect) onFileSelect(localFile);
+      }
+    };
+    input.click();
   };
 
   React.useEffect(() => {
@@ -336,24 +350,12 @@ export const VideoPlayer = ({ video, onClose, cachedFile, onFileSelect }: VideoP
 
 export const TitleBar = ({ title }: { title: string }) => {
   return (
-    <div className="bg-[#0a0a0a] h-10 flex items-center border-b border-white/[0.05] relative z-[100] select-none win-drag">
+    <div className="bg-[#0a0a0a] h-10 flex items-center border-b border-white/[0.05] relative z-[100] select-none">
       <div className="flex items-center gap-3 px-4">
         <div className="w-5 h-5 bg-blue-600 flex items-center justify-center">
           <Database className="w-3.5 h-3.5 text-white" />
         </div>
         <span className="text-[11px] font-bold text-zinc-400 tracking-wider uppercase">{title}</span>
-      </div>
-      <div className="flex-1" />
-      <div className="flex h-full no-drag">
-        <div className="h-full px-4 flex items-center transition-colors text-zinc-500 hover:text-white cursor-pointer hover:bg-white/5">
-          <Minimize2 className="w-3.5 h-3.5" />
-        </div>
-        <div className="h-full px-5 flex items-center transition-colors text-zinc-500 hover:text-white cursor-pointer hover:bg-white/5">
-          <Square className="w-3 h-3" />
-        </div>
-        <div className="h-full px-5 flex items-center transition-colors text-zinc-500 hover:text-white cursor-pointer hover:bg-red-600">
-          <CloseIcon className="w-3.5 h-3.5" />
-        </div>
       </div>
     </div>
   );
@@ -642,10 +644,9 @@ export const SettingsModal = ({ isOpen, onClose, onUpdate, onReset }: { isOpen: 
 
   React.useEffect(() => {
     if (!isOpen) return;
-    window.electron.settings.get<string>('geminiApiKey').then((v) => {
-      setGeminiKeySaved(!!v);
-      setGeminiKey('');
-    });
+    const v = localStorage.getItem('db_gemini_api_key');
+    setGeminiKeySaved(!!v);
+    setGeminiKey('');
   }, [isOpen]);
 
   const saveSettings = async () => {
@@ -657,14 +658,14 @@ export const SettingsModal = ({ isOpen, onClose, onUpdate, onReset }: { isOpen: 
     localStorage.setItem('db_aspect_ratio', aspectRatio);
 
     if (geminiKey.trim()) {
-      await window.electron.settings.set('geminiApiKey', geminiKey.trim());
+      localStorage.setItem('db_gemini_api_key', geminiKey.trim());
     }
     onUpdate();
     onClose();
   };
 
   const clearGeminiKey = async () => {
-    await window.electron.settings.delete('geminiApiKey');
+    localStorage.removeItem('db_gemini_api_key');
     setGeminiKey('');
     setGeminiKeySaved(false);
   };

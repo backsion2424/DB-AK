@@ -19,7 +19,7 @@
     "electron:build": "npm run build && npm run electron:tsc && electron-builder"
   },
   "dependencies": {
-    "@google/genai": "^2.0.1",
+    "@google/generative-ai": "^0.24.1",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^11.5.0",
@@ -60,7 +60,9 @@
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "DB-Archive-${version}.${ext}"

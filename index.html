@@ -4,6 +4,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DB Archive</title>
+    <script>
+      /**
+       * Fix for "Uncaught TypeError: Cannot set property fetch of #<Window> which has only a getter"
+       * This error occurs when a library (like whatwg-fetch or node-fetch polyfills) 
+       * attempts to overwrite window.fetch in environments where it's a read-only getter.
+       */
+      (function() {
+        try {
+          const win = window;
+          // Check window and its prototype chain
+          let target = win;
+          let descriptor = Object.getOwnPropertyDescriptor(target, 'fetch');
+          
+          if (!descriptor) {
+            target = Object.getPrototypeOf(win);
+            descriptor = Object.getOwnPropertyDescriptor(target, 'fetch');
+          }
+
+          if (descriptor && descriptor.configurable) {
+            let currentFetch = win.fetch;
+            Object.defineProperty(win, 'fetch', {
+              get: () => currentFetch,
+              set: (v) => { currentFetch = v; },
+              enumerable: true,
+              configurable: true
+            });
+          }
+        } catch (e) {
+          // Fail-safe
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

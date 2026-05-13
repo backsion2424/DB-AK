@@ -12,38 +12,28 @@ import { scrapeMetadata } from './services/scraper';
 import { safeStringify } from './lib/utils';
 
 export default function App() {
-  const [user, setUser] = useState<{ uid: string } | null>(null);
+  const [user, setUser] = useState<{ uid: string } | null>({ uid: 'local' });
   const [loading, setLoading] = useState(true);
   const [videos, setVideos] = useState<Video[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
 
-  // Initial load + IPC change subscriptions
+  const refreshVideos = useCallback(() => {
+    listVideos()
+      .then((v) => { setVideos(v); setLoading(false); })
+      .catch((e) => { console.error('Video load error:', e); setLoading(false); });
+  }, []);
+
+  const refreshCategories = useCallback(() => {
+    listCategories()
+      .then((c) => { setCategories(c); })
+      .catch((e) => console.error('Category load error:', e));
+  }, []);
+
+  // Initial load
   useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-
-    const refreshVideos = () => {
-      listVideos()
-        .then((v) => { if (!cancelled) { setVideos(v); setLoading(false); } })
-        .catch((e) => { console.error('Video load error:', e); setLoading(false); });
-    };
-    const refreshCategories = () => {
-      listCategories()
-        .then((c) => { if (!cancelled) setCategories(c); })
-        .catch((e) => console.error('Category load error:', e));
-    };
-
     refreshVideos();
     refreshCategories();
-    const offV = window.electron.videos.onChanged(refreshVideos);
-    const offC = window.electron.categories.onChanged(refreshCategories);
-
-    return () => {
-      cancelled = true;
-      offV();
-      offC();
-    };
-  }, [user?.uid]);
+  }, [refreshVideos, refreshCategories]);
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedActor, setSelectedActor] = useState<string | null>(null);
@@ -199,9 +189,6 @@ export default function App() {
 
   const dbInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    setUser({ uid: 'local' });
-  }, []);
 
   useEffect(() => {
     document.body.style.fontFamily = settingsValues.fontFamily;
@@ -305,14 +292,61 @@ export default function App() {
 
   const handlePickFiles = async () => {
     if (!authenticated) { setShowAuthModal(true); return; }
-    const files = await window.electron.files.openFiles();
-    await processFiles(files);
+    
+    // Electron 환경인 경우
+    if (window.electron) {
+      const files = await window.electron.files.openFiles();
+      await processFiles(files);
+      return;
+    }
+
+    // 브라우저 미리보기 환경인 경우 (전자 파일 연동 없이 수동 선택)
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = 'video/*';
+    input.onchange = async (e) => {
+      const inputFiles = (e.target as HTMLInputElement).files;
+      if (inputFiles) {
+        const files: LocalFile[] = Array.from(inputFiles).map(f => ({
+          name: f.name,
+          absPath: URL.createObjectURL(f),
+          size: f.size
+        }));
+        await processFiles(files);
+      }
+    };
+    input.click();
   };
 
   const handlePickFolder = async () => {
     if (!authenticated) { setShowAuthModal(true); return; }
-    const files = await window.electron.files.openFolder();
-    await processFiles(files);
+
+    // Electron 환경인 경우
+    if (window.electron) {
+      const files = await window.electron.files.openFolder();
+      await processFiles(files);
+      return;
+    }
+
+    // 브라우저 미리보기 환경인 경우
+    const input = document.createElement('input');
+    input.type = 'file';
+    (input as any).webkitdirectory = true;
+    input.onchange = async (e) => {
+      const inputFiles = (e.target as HTMLInputElement).files;
+      if (inputFiles) {
+        const files: LocalFile[] = Array.from(inputFiles)
+          .filter(f => f.name.match(/\.(mp4|mkv|avi|wmv|mov|flv|webm)$/i))
+          .map(f => ({
+            name: f.name,
+            absPath: URL.createObjectURL(f),
+            size: f.size
+          }));
+        await processFiles(files);
+      }
+    };
+    input.click();
   };
 
   const handleScrape = async () => {
@@ -419,6 +453,7 @@ export default function App() {
         return deleteVideo(id);
       }));
       
+      refreshVideos();
       setSelectedVideo(null);
       setSelectedVideoIds(prev => {
         const next = new Set(prev);
@@ -632,19 +667,35 @@ export default function App() {
   }, [videos]);
 
   const handleBulkDeleteDuplicates = async () => {
-    if (!confirm('각 그룹에서 첫 번째 항목만 남기고 나머지 중복 항목을 모두 삭제하시겠습니까?')) return;
+    if (!confirm('각 그룹에서 설정(태그, 배우 등)이 가장 많은 항목을 제외한 나머지 중복 항목을 모두 삭제하시겠습니까?')) return;
     
     setIsScraping(true);
     abortScrapingRef.current = false;
     try {
       for (const group of duplicateGroups) {
         if (abortScrapingRef.current) break;
-        const toDelete = group.slice(1);
+        
+        // 메타데이터 완성도 점수 계산
+        const getScore = (v: Video) => {
+          let score = 0;
+          if (v.actors && v.actors.length > 0) score += v.actors.length * 10;
+          if (v.tags && v.tags.length > 0) score += v.tags.length;
+          if (v.posterUrl) score += 5;
+          if (v.description) score += 5;
+          if (v.userRating) score += 2;
+          return score;
+        };
+
+        // 점수가 높은 순으로 정렬
+        const sorted = [...group].sort((a, b) => getScore(b) - getScore(a));
+        
+        const toDelete = sorted.slice(1);
         for (const v of toDelete) {
           if (abortScrapingRef.current) break;
           if (v.id) await deleteVideo(v.id);
         }
       }
+      refreshVideos();
       setDuplicateGroups([]);
       setShowDuplicateModal(false);
       alert('중복 정리가 완료되었습니다.');
@@ -775,7 +826,7 @@ export default function App() {
       videoEl.crossOrigin = 'anonymous';
       videoEl.muted = true;
       videoEl.playsInline = true;
-      videoEl.src = file ? window.electron.files.toMediaUrl(file.absPath) : videoUrl!;
+      videoEl.src = file ? (window.electron ? window.electron.files.toMediaUrl(file.absPath) : file.absPath) : videoUrl!;
       videoEl.preload = 'auto';
       
       await new Promise((resolve, reject) => {
@@ -901,6 +952,7 @@ export default function App() {
           if (abortScrapingRef.current) break;
           await deleteVideo(v.id);
         }
+        refreshVideos();
         alert('정리가 완료되었습니다.');
       } finally {
         setIsScraping(false);
@@ -920,7 +972,7 @@ export default function App() {
       let url: string | null = null;
       
       if (file) {
-        url = window.electron.files.toMediaUrl(file.absPath);
+        url = window.electron ? window.electron.files.toMediaUrl(file.absPath) : file.absPath;
       } else {
         url = manualThumbVideo.videoUrl || (manualThumbVideo as any).previewVideoUrl || null;
       }
@@ -1102,8 +1154,7 @@ export default function App() {
           onToggle={() => setActiveMenu(activeMenu === 'file' ? null : 'file')}
           items={[
             { label: '파일 가져오기', onClick: handlePickFiles },
-            { label: '폴더 가져오기', onClick: handlePickFolder },
-            { label: '종료', onClick: () => window.close() }
+            { label: '폴더 가져오기', onClick: handlePickFolder }
           ]} 
         />
         <MenuBarItem 
@@ -2165,6 +2216,7 @@ export default function App() {
                            onClick={async () => {
                              if (confirm('이 중복 항목을 삭제하시겠습니까?')) {
                                await deleteVideo(v.id!);
+                               refreshVideos();
                                setDuplicateGroups(prev => prev.map(g => g.filter(item => item.id !== v.id)).filter(g => g.length > 1));
                              }
                            }}
